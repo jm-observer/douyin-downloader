@@ -279,8 +279,8 @@ class Douyin(object):
             
             while True:
                 try:
-                    # 构建请求URL - 添加更多必需参数
-                    base_params = f'sec_user_id={sec_uid}&count={count}&max_cursor={max_cursor}&device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=170400&version_name=17.4.0&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=MacIntel&browser_name=Chrome&browser_version=122.0.0.0&browser_online=true&engine_name=Blink&engine_version=122.0.0.0&os_name=Mac&os_version=10.15.7&cpu_core_num=8&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=50'
+                    # 构建请求URL - 使用更完整的参数
+                    base_params = f'sec_user_id={sec_uid}&count={count}&max_cursor={max_cursor}&device_platform=webapp&aid=6383&channel=channel_pc_web&pc_client_type=1&version_code=290100&version_name=29.1.0&cookie_enabled=true&screen_width=1920&screen_height=1080&browser_language=zh-CN&browser_platform=Win32&browser_name=Edge&browser_version=125.0.0.0&browser_online=true&engine_name=Blink&engine_version=125.0.0.0&os_name=Windows&os_version=10&cpu_core_num=8&device_memory=8&platform=PC&downlink=10&effective_type=4g&round_trip_time=100&locate_query=false&show_live_replay_strategy=1&need_time_list=1&time_list_query=0&whale_cut_token=&cut_version=1&publish_video_strategy_type=2&update_version_code=170400'
 
                     if mode == "post":
                         url = self.urls.USER_POST + utils.getXbogus(base_params)
@@ -334,7 +334,14 @@ class Douyin(object):
                         self.console.print(f"[yellow]🔍 可用字段: {list(datadict.keys())}[/]")
                         break
 
-                    current_count = len(datadict["aweme_list"])
+                    # 检查aweme_list是否为None
+                    aweme_list = datadict["aweme_list"]
+                    if aweme_list is None:
+                        self.console.print(f"[red]❌ aweme_list字段为None[/]")
+                        self.console.print(f"[yellow]🔍 响应内容: {str(datadict)[:200]}...[/]")
+                        break
+
+                    current_count = len(aweme_list)
                     total_fetched += current_count
                     
                     # 更新进度显示
@@ -344,7 +351,7 @@ class Douyin(object):
                     )
 
                     # 在处理作品时添加时间过滤
-                    for aweme in datadict["aweme_list"]:
+                    for aweme in aweme_list:
                         create_time = time.strftime(
                             "%Y-%m-%d", 
                             time.localtime(int(aweme.get("create_time", 0)))

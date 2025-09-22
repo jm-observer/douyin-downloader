@@ -47,14 +47,19 @@ from apiproxy.douyin.database import DataBase
 
 # 配置日志
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    level=logging.DEBUG,  # 改为DEBUG级别
+    format='%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
     handlers=[
         logging.FileHandler('downloader.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
+
+# 设置第三方库的日志级别
+logging.getLogger('aiohttp').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('requests').setLevel(logging.WARNING)
 
 # Rich console
 console = Console()
@@ -210,26 +215,42 @@ class UnifiedDownloader:
 
     async def _initialize_cookies_and_headers(self):
         """初始化Cookie与请求头（支持自动获取）"""
+        logger.debug("开始初始化Cookie和请求头")
+        logger.debug(f"当前Cookie配置: {self.cookies}")
+        logger.debug(f"自动Cookie模式: {self.auto_cookie}")
+        
         # 若配置为字符串 'auto'，视为未提供，触发自动获取
         if isinstance(self.cookies, str) and self.cookies.strip().lower() == 'auto':
+            logger.info("检测到Cookie配置为'auto'，将触发自动获取")
             self.cookies = None
         
         # 若已显式提供cookies，则直接使用
         cookie_str = self._build_cookie_string()
         if cookie_str:
+            logger.info("使用已配置的Cookie")
+            logger.debug(f"Cookie字符串长度: {len(cookie_str)}")
             self.headers['Cookie'] = cookie_str
             # 同时设置到全局 douyin_headers，确保所有 API 请求都能使用
             from apiproxy.douyin import douyin_headers
             douyin_headers['Cookie'] = cookie_str
+            logger.info("✅ Cookie设置完成")
             return
         
         # 自动获取Cookie
         if self.auto_cookie:
             try:
+                logger.info("开始自动获取Cookie")
                 console.print("[cyan]🔐 正在自动获取Cookie...[/cyan]")
-                async with AutoCookieManager(cookie_file='cookies.pkl', headless=False) as cm:
+                # 检测是否在Docker环境中，如果是则使用无头模式
+                import os
+                is_docker = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER') == 'true'
+                headless_mode = is_docker or os.environ.get('HEADLESS', 'false').lower() == 'true'
+                
+                logger.info(f"检测到Docker环境: {is_docker}, 使用无头模式: {headless_mode}")
+                async with AutoCookieManager(cookie_file='cookies.pkl', headless=headless_mode) as cm:
                     cookies_list = await cm.get_cookies()
                     if cookies_list:
+                        logger.info(f"成功获取到 {len(cookies_list)} 个Cookie")
                         self.cookies = cookies_list
                         cookie_str = self._build_cookie_string()
                         if cookie_str:
@@ -238,6 +259,7 @@ class UnifiedDownloader:
                             from apiproxy.douyin import douyin_headers
                             douyin_headers['Cookie'] = cookie_str
                             console.print("[green]✅ Cookie获取成功[/green]")
+                            logger.info("✅ 自动获取Cookie成功")
                             return
                 console.print("[yellow]⚠️ 自动获取Cookie失败或为空，继续尝试无Cookie模式[/yellow]")
             except Exception as e:
@@ -720,12 +742,14 @@ class UnifiedDownloader:
     async def download_user_page(self, url: str) -> bool:
         """下载用户主页内容"""
         try:
+            logger.info(f"开始处理用户主页: {url}")
             # 提取用户ID
             user_id = self.extract_id_from_url(url, ContentType.USER)
             if not user_id:
                 logger.error(f"无法从URL提取用户ID: {url}")
                 return False
             
+            logger.info(f"提取到用户ID: {user_id}")
             console.print(f"\n[cyan]正在获取用户 {user_id} 的作品列表...[/cyan]")
             
             # 根据配置下载不同类型的内容
@@ -764,6 +788,8 @@ class UnifiedDownloader:
         cursor = 0
         downloaded = 0
         
+        logger.info(f"开始下载用户 {user_id} 的发布作品")
+        logger.debug(f"最大下载数量: {max_count}")
         console.print(f"\n[green]开始下载用户发布的作品...[/green]")
         
         with Progress(
@@ -831,13 +857,16 @@ class UnifiedDownloader:
     async def _fetch_user_posts(self, user_id: str, cursor: int = 0) -> Optional[Dict]:
         """获取用户作品列表"""
         try:
+            logger.info(f"开始获取用户 {user_id} 的作品列表，cursor: {cursor}")
             # 直接使用 Douyin 类的 getUserInfo 方法，就像 DouYinCommand.py 那样
             from apiproxy.douyin.douyin import Douyin
             
             # 创建 Douyin 实例
+            logger.debug("创建Douyin实例")
             dy = Douyin(database=False)
             
             # 获取用户作品列表
+            logger.debug(f"调用getUserInfo方法，参数: user_id={user_id}, mode=post, count=35")
             result = dy.getUserInfo(
                 user_id, 
                 "post", 
@@ -847,6 +876,9 @@ class UnifiedDownloader:
                 "",  # start_time
                 ""   # end_time
             )
+            
+            logger.debug(f"getUserInfo返回结果类型: {type(result)}")
+            logger.debug(f"getUserInfo返回结果: {result}")
             
             if result:
                 logger.info(f"Douyin 类成功获取用户作品列表，共 {len(result)} 个作品")
@@ -1322,6 +1354,9 @@ class UnifiedDownloader:
     
     async def run(self):
         """运行下载器"""
+        logger.info("🚀 启动抖音下载器")
+        logger.debug(f"配置信息: {self.config}")
+        
         # 显示启动信息
         console.print(Panel.fit(
             "[bold cyan]抖音下载器 v3.0 - 统一增强版[/bold cyan]\n"
@@ -1330,14 +1365,20 @@ class UnifiedDownloader:
         ))
         
         # 初始化Cookie与请求头
+        logger.info("🔐 开始初始化Cookie和请求头")
         await self._initialize_cookies_and_headers()
+        logger.info("✅ Cookie和请求头初始化完成")
         
         # 获取URL列表
         urls = self.config.get('link', [])
         # 兼容：单条字符串
         if isinstance(urls, str):
             urls = [urls]
+        logger.info(f"📋 获取到 {len(urls)} 个下载链接")
+        logger.debug(f"链接列表: {urls}")
+        
         if not urls:
+            logger.error("❌ 没有找到要下载的链接")
             console.print("[red]没有找到要下载的链接！[/red]")
             return
         
