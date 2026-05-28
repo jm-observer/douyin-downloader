@@ -151,6 +151,140 @@ def test_list_works_bad_date(tmp_path):
     assert "日期格式" in out["msg"]
 
 
+# ----------------------------- set_cookie ----------------------------------
+
+def test_set_cookie_header_format(tmp_path):
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "zero_tool",
+            "set_cookie",
+            "--raw",
+            "msToken=Tok123; ttwid=Two456; sessionid_ss=Sess789; extra=x",
+        ],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["success"] is True
+    assert out["field_count"] == 4
+    assert set(out["has_required"]) == {"msToken", "ttwid", "sessionid_ss"}
+
+    # 文件落盘
+    path = tmp_path / "douyin" / "cookies.json"
+    assert path.exists()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["value"]["msToken"] == "Tok123"
+    assert data["value"]["ttwid"] == "Two456"
+    assert "updated_at" in data
+
+
+def test_set_cookie_json_object(tmp_path):
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "zero_tool",
+            "set_cookie",
+            "--raw",
+            json.dumps({"msToken": "X", "ttwid": "Y"}),
+        ],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["success"] is True
+    assert out["field_count"] == 2
+
+
+def test_set_cookie_full_schema(tmp_path):
+    """支持直接吃我们落盘的 {value, updated_at} 形式（方便 round-trip）。"""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "zero_tool",
+            "set_cookie",
+            "--raw",
+            json.dumps(
+                {
+                    "value": {"msToken": "A", "ttwid": "B"},
+                    "updated_at": "2026-01-01T00:00:00+08:00",
+                }
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["success"] is True
+    assert out["field_count"] == 2
+
+
+def test_set_cookie_missing_required(tmp_path):
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "zero_tool",
+            "set_cookie",
+            "--raw",
+            "foo=bar; baz=qux",  # 没 msToken/ttwid/sessionid_ss
+        ],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["error"] == "invalid_input"
+    assert "核心 cookie 字段" in out["msg"]
+
+
+def test_set_cookie_empty(tmp_path):
+    proc = subprocess.run(
+        [sys.executable, "-m", "zero_tool", "set_cookie", "--raw", "   "],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["error"] == "invalid_input"
+
+
+def test_set_cookie_overwrites_existing(tmp_path):
+    """已存在 cookies.json 时应被覆盖（原子替换）。"""
+    p = tmp_path / "douyin" / "cookies.json"
+    p.parent.mkdir(parents=True)
+    p.write_text(json.dumps({"value": {"old": "x"}, "updated_at": "old"}), encoding="utf-8")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "zero_tool",
+            "set_cookie",
+            "--raw",
+            "msToken=NEW; ttwid=NEW2",
+        ],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["value"] == {"msToken": "NEW", "ttwid": "NEW2"}
+    assert data["updated_at"] != "old"
+
+
 # ----------------------------- download_submit -----------------------------
 
 def test_download_submit_empty_ids(tmp_path):
