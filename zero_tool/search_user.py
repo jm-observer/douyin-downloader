@@ -45,6 +45,24 @@ async def _search(keyword: str, limit: int, cookies: Dict[str, str]) -> Dict[str
     async with DouyinAPIClient(cookies) as api:
         result = await api.search_user(keyword, count=min(limit, 20))
         items = result.get("items", [])
+
+        # 检测抖音风控拦截：search_nil_info.search_nil_type == 'verify_check'
+        # 出现条件：cookie 状态 / IP 信誉 / 频次过高，搜索类接口被打回。
+        # 非搜索接口（resolve_user / list_works / download）通常不受影响。
+        raw = result.get("raw") or {}
+        nil_info = raw.get("search_nil_info") if isinstance(raw, dict) else None
+        if not items and isinstance(nil_info, dict):
+            nil_type = nil_info.get("search_nil_type")
+            if nil_type == "verify_check":
+                return {
+                    "_error": "anti_bot",
+                    "_msg": (
+                        "抖音搜索接口被风控拦截（verify_check）。"
+                        "请改用博主主页 URL（v.douyin.com/... 或 https://www.douyin.com/user/...）"
+                        "走 douyin_resolve_user，跳过搜索环节。"
+                    ),
+                }
+
         users: List[Dict[str, Any]] = [_user_to_compact(u) for u in items[:limit]]
         return {
             "users": users,
@@ -93,6 +111,10 @@ def run() -> None:
         print_error(
             "network_error", f"搜索博主时出错：{exc.__class__.__name__}: {exc}"
         )
+        return
+
+    if isinstance(result, dict) and "_error" in result:
+        print_error(result["_error"], result["_msg"])
         return
 
     print_json(result)
