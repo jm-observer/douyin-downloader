@@ -83,15 +83,31 @@ async def _list(
     end_ts: Optional[int],
     cookies: Dict[str, str],
 ) -> Dict[str, Any]:
+    """拉取博主作品元数据列表。
+
+    退出条件（满足任一）：
+    1. 累计达到 limit
+    2. 抖音明确告知 has_more=False
+    3. cursor 不再前进（卡死）
+    4. **连续** 5 次空页（抖音 shadow throttle 下偶尔会插空页，单次空不退）
+    5. 总 page 请求数达到上限 30（兜底）
+
+    Throttled 状态：has_more 一直 True 但累计实际只拿到极少（avg < 2 items/page）
+    时标记 throttled=True，让上游知道"抖音在限流"。
+    """
     from core import DouyinAPIClient
 
     works: List[Dict[str, Any]] = []
     truncated = False
     max_cursor = 0
-    saw_any = False
+    empty_page_streak = 0
+    pages_fetched = 0
+    items_observed_total = 0
+    MAX_EMPTY_STREAK = 5
+    MAX_PAGES = 30
 
     async with DouyinAPIClient(cookies) as api_client:
-        while len(works) < limit:
+        while len(works) < limit and pages_fetched < MAX_PAGES:
             if mode == "post":
                 page = await api_client.get_user_post(
                     sec_uid, max_cursor=max_cursor, count=_PAGE_SIZE
@@ -100,34 +116,52 @@ async def _list(
                 page = await api_client.get_user_like(
                     sec_uid, max_cursor=max_cursor, count=_PAGE_SIZE
                 )
+            pages_fetched += 1
 
             if not page:
                 break
-            items = page.get("aweme_list") or []
-            if not items and saw_any:
-                # 二次空白页：抖音翻页结束
-                break
 
-            saw_any = True
-            for item in items:
-                ct = int(item.get("create_time") or 0)
-                if start_ts is not None and ct < start_ts:
-                    continue
-                if end_ts is not None and ct > end_ts + 86399:  # 当日 23:59:59 含进来
-                    continue
-                works.append(_aweme_to_meta(item))
-                if len(works) >= limit:
-                    truncated = True
+            items = page.get("aweme_list") or []
+            items_observed_total += len(items)
+
+            if items:
+                empty_page_streak = 0
+                for item in items:
+                    ct = int(item.get("create_time") or 0)
+                    if start_ts is not None and ct < start_ts:
+                        continue
+                    if end_ts is not None and ct > end_ts + 86399:
+                        continue
+                    works.append(_aweme_to_meta(item))
+                    if len(works) >= limit:
+                        truncated = True
+                        break
+            else:
+                empty_page_streak += 1
+                if empty_page_streak >= MAX_EMPTY_STREAK:
                     break
 
             if page.get("has_more") in (0, False, None):
                 break
             new_cursor = int(page.get("max_cursor") or 0)
             if new_cursor == max_cursor:
-                break  # 防卡死
+                break  # cursor 卡死，真的没了
             max_cursor = new_cursor
 
-    return {"works": works, "count": len(works), "truncated": truncated}
+    # Shadow throttle 检测：page 拉了至少 3 次，但平均每页 < 2 items
+    throttled = (
+        pages_fetched >= 3
+        and items_observed_total / pages_fetched < 2
+        and len(works) < limit
+    )
+
+    return {
+        "works": works,
+        "count": len(works),
+        "truncated": truncated,
+        "throttled": throttled,
+        "pages_fetched": pages_fetched,
+    }
 
 
 def run() -> None:
