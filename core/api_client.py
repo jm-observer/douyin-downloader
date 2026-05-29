@@ -729,7 +729,11 @@ class DouyinAPIClient:
                 "search_channel": "aweme_user_web",
                 "search_source": "normal_search",
                 "query_correct_type": "1",
-                "is_filter_search": 0,
+                # 用户搜索通道要这几个额外参数，否则抖音返回 search_nil_info
+                # （即"无结果"），参考 cv-cat/DouYin_Spider search_user 实现。
+                "search_filter_value": '{"douyin_user_fans":[""],"douyin_user_type":[""]}',
+                "is_filter_search": 1,
+                "need_filter_settings": "1" if offset == 0 else "0",
                 "list_type": "single",
                 "offset": offset,
                 "count": count,
