@@ -176,6 +176,7 @@ class DouyinAPIClient:
         *,
         suppress_error: bool = False,
         max_retries: int = 3,
+        referer: Optional[str] = None,
     ) -> Dict[str, Any]:
         await self._ensure_session()
         delays = [1, 2, 5]
@@ -183,10 +184,13 @@ class DouyinAPIClient:
 
         for attempt in range(max_retries):
             signed_url, ua = self.build_signed_path(path, params)
+            req_headers = {**self.headers, "User-Agent": ua}
+            if referer:
+                req_headers["Referer"] = referer
             try:
                 async with self._session.get(
                     signed_url,
-                    headers={**self.headers, "User-Agent": ua},
+                    headers=req_headers,
                     proxy=self.proxy or None,
                 ) as response:
                     if response.status == 200:
@@ -320,8 +324,20 @@ class DouyinAPIClient:
                 "max_cursor": max_cursor,
                 "count": count,
                 "locate_query": "false",
+                # 关键：标识"从博主主页发起"的爬取，浏览器一定带这个。
+                # 没传时抖音会把请求降级（实测：博主有 80 条作品，但只回 4 页 15 条）。
+                "from_user_page": "1",
             }
         )
+        # 从 cookie 里抽出 uifid / verifyFp / fp，浏览器自带这几个，
+        # 不传时抖音判定为"请求质量低"，限制返回深度。
+        uifid = self.cookies.get("UIFID") or self.cookies.get("uifid")
+        if uifid:
+            params["uifid"] = uifid
+        s_v_web_id = self.cookies.get("s_v_web_id")
+        if s_v_web_id:
+            params["verifyFp"] = s_v_web_id
+            params["fp"] = s_v_web_id
         return params
 
     # aid=1128 works for videos but filters out image/note content;
@@ -376,14 +392,20 @@ class DouyinAPIClient:
         params.update(
             {
                 "show_live_replay_strategy": "1",
-                "need_time_list": "1",
+                # 浏览器实测 need_time_list=0；为 1 时抖音可能据此走另一条受限路径
+                "need_time_list": "0",
                 "time_list_query": "0",
                 "whale_cut_token": "",
                 "cut_version": "1",
                 "publish_video_strategy_type": "2",
             }
         )
-        raw = await self._request_json("/aweme/v1/web/aweme/post/", params)
+        # Referer 必须设为博主主页，否则抖音判定为非主页爬取，截断返回。
+        raw = await self._request_json(
+            "/aweme/v1/web/aweme/post/",
+            params,
+            referer=f"{self.BASE_URL}/user/{sec_uid}",
+        )
         return self._normalize_paged_response(raw, item_keys=["aweme_list"])
 
     async def get_user_like(
