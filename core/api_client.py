@@ -703,6 +703,92 @@ class DouyinAPIClient:
             "raw": raw,
         }
 
+    async def search_user(
+        self,
+        keyword: str,
+        *,
+        offset: int = 0,
+        count: int = 10,
+    ) -> Dict[str, Any]:
+        """搜索用户（博主）。
+
+        支持用昵称、抖音号或任意关键词检索博主。复用与 ``search_aweme``
+        相同的 ``/aweme/v1/web/general/search/single/`` 端点，仅切
+        ``search_channel`` 为 ``aweme_user_web``。
+
+        Returns:
+            ``{items, has_more, max_cursor, status_code, raw}``。每个
+            item 是抖音返回的 user_info dict，含 ``sec_uid`` / ``uid``
+            / ``nickname`` / ``unique_id``（抖音号）/ ``signature``
+            / ``follower_count`` / ``avatar_thumb`` 等字段。
+        """
+        params = await self._default_query()
+        params.update(
+            {
+                "keyword": keyword,
+                "search_channel": "aweme_user_web",
+                "search_source": "normal_search",
+                "query_correct_type": "1",
+                "is_filter_search": 0,
+                "list_type": "single",
+                "offset": offset,
+                "count": count,
+            }
+        )
+        raw = await self._request_json(
+            "/aweme/v1/web/general/search/single/", params, suppress_error=True
+        )
+
+        items: List[Dict[str, Any]] = []
+        # 兼容两种返回形态：
+        # A) 顶层 user_list（旧端点 /discover/search 风格，cv-cat 见过的）
+        # B) data[].user_info（与 search_aweme 同端点的标准形态）
+        user_list = raw.get("user_list")
+        if isinstance(user_list, list):
+            for u in user_list:
+                if not isinstance(u, dict):
+                    continue
+                inner = u.get("user_info")
+                items.append(inner if isinstance(inner, dict) else u)
+        else:
+            data_list = raw.get("data") if isinstance(raw.get("data"), list) else []
+            for entry in data_list:
+                if not isinstance(entry, dict):
+                    continue
+                user_info = entry.get("user_info")
+                if isinstance(user_info, dict):
+                    items.append(user_info)
+
+        has_more_value = raw.get("has_more", 0)
+        try:
+            has_more = bool(int(has_more_value))
+        except (TypeError, ValueError):
+            has_more = bool(has_more_value)
+
+        cursor_value = raw.get("cursor") or raw.get("offset") or 0
+        try:
+            next_offset = int(cursor_value)
+        except (TypeError, ValueError):
+            next_offset = 0
+
+        status_code = int(raw.get("status_code") or 0)
+        if not items and (status_code or not raw):
+            logger.warning(
+                "User search returned no items for keyword=%r (status_code=%s, offset=%s). "
+                "Possible causes: cookies expired, signature rejected, or no match.",
+                keyword,
+                status_code,
+                offset,
+            )
+
+        return {
+            "items": items,
+            "has_more": has_more,
+            "max_cursor": next_offset,
+            "status_code": status_code,
+            "raw": raw,
+        }
+
     async def get_aweme_comments(
         self,
         aweme_id: str,

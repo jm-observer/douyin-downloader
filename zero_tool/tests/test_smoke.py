@@ -81,6 +81,57 @@ def test_cookie_status_invalid_format(tmp_path):
     assert "格式错误" in out["msg"]
 
 
+# ----------------------------- search_user ---------------------------------
+
+def test_search_user_no_cookie(tmp_path):
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "zero_tool",
+            "search_user",
+            "--keyword",
+            "张三",
+        ],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["error"] == "cookie_missing"
+
+
+def test_search_user_empty_keyword(tmp_path):
+    (tmp_path / "douyin").mkdir(parents=True)
+    (tmp_path / "douyin" / "cookies.json").write_text(
+        json.dumps({"value": {"ttwid": "T"}, "updated_at": ""}),
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [sys.executable, "-m", "zero_tool", "search_user", "--keyword", "   "],
+        capture_output=True,
+        text=True,
+        env={"ZERO_WORKSPACE": str(tmp_path), **_safe_env()},
+    )
+    assert proc.returncode == 0
+    out = json.loads(proc.stdout)
+    assert out["error"] == "invalid_input"
+
+
+def test_search_user_help_arg():
+    """argparse 应能识别 --help（不真打 API）"""
+    proc = subprocess.run(
+        [sys.executable, "-m", "zero_tool", "search_user", "--help"],
+        capture_output=True,
+        text=True,
+        env=_safe_env(),
+    )
+    assert proc.returncode == 0
+    assert "--keyword" in proc.stdout
+    assert "--limit" in proc.stdout
+
+
 # ----------------------------- resolve_user --------------------------------
 
 def test_resolve_user_no_cookie(tmp_path):

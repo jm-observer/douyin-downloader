@@ -6,6 +6,7 @@
 子命令：
     cookie_status     检查 cookie 是否可用
     set_cookie        用用户提供的 cookie 内容写入 cookies.json
+    search_user       按昵称/抖音号/关键词搜博主
     resolve_user      根据 handle/URL 解析博主 sec_uid
     list_works        列博主作品元数据
     download_submit   异步提交下载任务，返回 task_id
@@ -20,6 +21,7 @@ import sys
 _SUBCOMMANDS = {
     "cookie_status": "zero_tool.cookie_status",
     "set_cookie": "zero_tool.set_cookie",
+    "search_user": "zero_tool.search_user",
     "resolve_user": "zero_tool.resolve_user",
     "list_works": "zero_tool.list_works",
     "download_submit": "zero_tool.download_submit",
